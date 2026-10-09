@@ -12,7 +12,7 @@ import {
 	MAX_BOX_ITEMS,
 	updateBoxItemsSchema,
 } from "./api.js";
-import { type BoxItemDoc, sortEntries } from "./doc.js";
+import { type BoxItemDoc, sortEntries, type UserDoc } from "./doc.js";
 
 /** Firestore database ID (not the `(default)` database). */
 const DATABASE_ID = "pksl-nitoyon";
@@ -27,16 +27,23 @@ export const corsOrigins = isEmulator
 
 /**
  * Get all items in the order they were added.
+ * `needsInit` is true if the box is empty and has never been initialized.
  */
 export const getBoxItems = onCall(
 	{ cors: corsOrigins },
-	async (request): Promise<{ items: BoxEntry[] }> => {
+	async (request): Promise<{ items: BoxEntry[]; needsInit: boolean }> => {
 		const uid = requireUid(request);
-		const snap = await boxItems(uid).get();
+		const [snap, userSnap] = await Promise.all([
+			boxItems(uid).get(),
+			userDoc(uid).get(),
+		]);
+		const items = sortEntries(
+			snap.docs.map((x) => ({ id: x.id, doc: x.data() as BoxItemDoc })),
+		);
+		const user = userSnap.data() as UserDoc | undefined;
 		return {
-			items: sortEntries(
-				snap.docs.map((x) => ({ id: x.id, doc: x.data() as BoxItemDoc })),
-			),
+			items,
+			needsInit: items.length === 0 && user?.boxInitialized !== true,
 		};
 	},
 );
@@ -59,6 +66,10 @@ export const addBoxItems = onCall(
 			const count = (await tx.get(col.count())).data().count;
 			if (count + items.length > MAX_BOX_ITEMS) {
 				throw new HttpsError("resource-exhausted", "box is full");
+			}
+			if (count === 0) {
+				const user: UserDoc = { boxInitialized: true };
+				tx.set(userDoc(uid), user, { merge: true });
 			}
 
 			const now = Date.now();
@@ -161,6 +172,10 @@ function db() {
 	return getFirestore(DATABASE_ID);
 }
 
+function userDoc(uid: string) {
+	return db().collection("users").doc(uid);
+}
+
 function boxItems(uid: string) {
-	return db().collection("users").doc(uid).collection("boxItems");
+	return userDoc(uid).collection("boxItems");
 }

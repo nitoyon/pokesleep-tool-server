@@ -5,6 +5,15 @@ import type { BoxEntry } from "./api.js";
 // without the emulator.
 
 /**
+ * User document stored at `users/{uid}`.
+ * It may not exist until the user adds items for the first time.
+ */
+export type UserDoc = {
+	/** True once the user has added items to the empty box. */
+	boxInitialized?: boolean;
+};
+
+/**
  * Box item document stored at `users/{uid}/boxItems/{id}`.
  */
 export type BoxItemDoc = {
