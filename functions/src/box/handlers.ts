@@ -14,6 +14,9 @@ import {
 } from "./api.js";
 import { type BoxItemDoc, sortEntries } from "./doc.js";
 
+/** Firestore database ID (not the `(default)` database). */
+const DATABASE_ID = "pksl-nitoyon";
+
 /** gRPC status code returned when a document to update does not exist. */
 const GRPC_NOT_FOUND = 5;
 
@@ -52,7 +55,7 @@ export const addBoxItems = onCall(
 		}
 
 		const col = boxItems(uid);
-		return await getFirestore().runTransaction(async (tx) => {
+		return await db().runTransaction(async (tx) => {
 			const count = (await tx.get(col.count())).data().count;
 			if (count + items.length > MAX_BOX_ITEMS) {
 				throw new HttpsError("resource-exhausted", "box is full");
@@ -89,7 +92,7 @@ export const updateBoxItems = onCall(
 		}
 
 		const col = boxItems(uid);
-		const batch = getFirestore().batch();
+		const batch = db().batch();
 		const now = Date.now();
 		items.forEach(({ id, data }, index) => {
 			const doc: Pick<BoxItemDoc, "data" | "updatedAt"> = {
@@ -122,7 +125,7 @@ export const deleteBoxItems = onCall(
 		}
 
 		const col = boxItems(uid);
-		const batch = getFirestore().batch();
+		const batch = db().batch();
 		for (const id of ids) {
 			batch.delete(col.doc(id));
 		}
@@ -154,6 +157,10 @@ function parseData<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
 	return parsed.data;
 }
 
+function db() {
+	return getFirestore(DATABASE_ID);
+}
+
 function boxItems(uid: string) {
-	return getFirestore().collection("users").doc(uid).collection("boxItems");
+	return db().collection("users").doc(uid).collection("boxItems");
 }

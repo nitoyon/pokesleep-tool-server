@@ -18,9 +18,12 @@
       ]
     }
   ],
-  "firestore": {
-    "rules": "firestore.rules"
-  },
+  "firestore": [
+    {
+      "database": "pksl-nitoyon",
+      "rules": "firestore.rules"
+    }
+  ],
   "emulators": {
     "functions": {
       "port": 5001
