@@ -1,0 +1,159 @@
+import { getFirestore } from "firebase-admin/firestore";
+import {
+	type CallableRequest,
+	HttpsError,
+	onCall,
+} from "firebase-functions/v2/https";
+import type { z } from "zod";
+import {
+	addBoxItemsSchema,
+	type BoxEntry,
+	deleteBoxItemsSchema,
+	MAX_BOX_ITEMS,
+	updateBoxItemsSchema,
+} from "./api.js";
+import { type BoxItemDoc, sortEntries } from "./doc.js";
+
+/** gRPC status code returned when a document to update does not exist. */
+const GRPC_NOT_FOUND = 5;
+
+const isEmulator = process.env.FUNCTIONS_EMULATOR === "true";
+export const corsOrigins = isEmulator
+	? true
+	: ["https://nitoyon.github.io", "https://www.nitoyon.com"];
+
+/**
+ * Get all items in the order they were added.
+ */
+export const getBoxItems = onCall(
+	{ cors: corsOrigins },
+	async (request): Promise<{ items: BoxEntry[] }> => {
+		const uid = requireUid(request);
+		const snap = await boxItems(uid).get();
+		return {
+			items: sortEntries(
+				snap.docs.map((x) => ({ id: x.id, doc: x.data() as BoxItemDoc })),
+			),
+		};
+	},
+);
+
+/**
+ * Add items to the end of the box.
+ * Returns the IDs of the added items in the same order as the request.
+ */
+export const addBoxItems = onCall(
+	{ cors: corsOrigins },
+	async (request): Promise<{ ids: string[] }> => {
+		const uid = requireUid(request);
+		const { items } = parseData(addBoxItemsSchema, request.data);
+		if (items.length === 0) {
+			return { ids: [] };
+		}
+
+		const col = boxItems(uid);
+		return await getFirestore().runTransaction(async (tx) => {
+			const count = (await tx.get(col.count())).data().count;
+			if (count + items.length > MAX_BOX_ITEMS) {
+				throw new HttpsError("resource-exhausted", "box is full");
+			}
+
+			const now = Date.now();
+			const ids: string[] = [];
+			items.forEach((data, index) => {
+				const ref = col.doc();
+				const doc: BoxItemDoc = {
+					data,
+					createdAt: now + index,
+					updatedAt: now + index,
+				};
+				tx.create(ref, doc);
+				ids.push(ref.id);
+			});
+			return { ids };
+		});
+	},
+);
+
+/**
+ * Update existing items.
+ * Fails with `not-found` (and updates nothing) if any item does not exist.
+ */
+export const updateBoxItems = onCall(
+	{ cors: corsOrigins },
+	async (request): Promise<void> => {
+		const uid = requireUid(request);
+		const { items } = parseData(updateBoxItemsSchema, request.data);
+		if (items.length === 0) {
+			return;
+		}
+
+		const col = boxItems(uid);
+		const batch = getFirestore().batch();
+		const now = Date.now();
+		items.forEach(({ id, data }, index) => {
+			const doc: Pick<BoxItemDoc, "data" | "updatedAt"> = {
+				data,
+				updatedAt: now + index,
+			};
+			batch.update(col.doc(id), doc);
+		});
+		try {
+			await batch.commit();
+		} catch (e) {
+			if ((e as { code?: unknown }).code === GRPC_NOT_FOUND) {
+				throw new HttpsError("not-found", "item not found");
+			}
+			throw e;
+		}
+	},
+);
+
+/**
+ * Delete items. Unknown IDs are ignored.
+ */
+export const deleteBoxItems = onCall(
+	{ cors: corsOrigins },
+	async (request): Promise<void> => {
+		const uid = requireUid(request);
+		const { ids } = parseData(deleteBoxItemsSchema, request.data);
+		if (ids.length === 0) {
+			return;
+		}
+
+		const col = boxItems(uid);
+		const batch = getFirestore().batch();
+		for (const id of ids) {
+			batch.delete(col.doc(id));
+		}
+		await batch.commit();
+	},
+);
+
+/**
+ * Get the UID of the signed-in user.
+ * @throws HttpsError if not signed in.
+ */
+function requireUid(request: CallableRequest): string {
+	const uid = request.auth?.uid;
+	if (uid === undefined) {
+		throw new HttpsError("unauthenticated", "sign-in required");
+	}
+	return uid;
+}
+
+/**
+ * Validate request data.
+ * @throws HttpsError if the data is invalid.
+ */
+function parseData<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
+	const parsed = schema.safeParse(data);
+	if (!parsed.success) {
+		throw new HttpsError("invalid-argument", "invalid request");
+	}
+	return parsed.data;
+}
+
+function boxItems(uid: string) {
+	return getFirestore().collection("users").doc(uid).collection("boxItems");
+}

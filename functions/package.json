@@ -5,11 +5,12 @@
 		"build:watch": "tsc --watch",
 		"fmt": "biome format --write",
 		"lint": "oxlint && biome check --error-on-warnings",
+		"test": "vitest run",
 		"lint:fix": "oxlint --fix && biome check --write --error-on-warnings",
 		"serve": "npm run build && firebase emulators:start --only functions,firestore",
 		"shell": "npm run build && firebase functions:shell",
 		"start": "npm run shell",
-		"deploy": "firebase deploy --only functions",
+		"deploy": "firebase deploy --only functions,firestore:rules",
 		"logs": "firebase functions:log"
 	},
 	"engines": {
@@ -27,7 +28,8 @@
 		"@types/web-push": "^3.6.4",
 		"firebase-functions-test": "^3.4.1",
 		"oxlint": "^1.87.0",
-		"typescript": "^6.0.0"
+		"typescript": "^6.0.0",
+		"vitest": "^5.0.3"
 	},
 	"private": true
 }
