@@ -33,12 +33,12 @@ export const getBoxItems = onCall(
 	{ cors: corsOrigins },
 	async (request): Promise<{ items: BoxEntry[]; needsInit: boolean }> => {
 		const uid = requireUid(request);
-		const [snap, userSnap] = await Promise.all([
+		const [boxItemsSnap, userSnap] = await Promise.all([
 			boxItems(uid).get(),
 			userDoc(uid).get(),
 		]);
 		const items = sortEntries(
-			snap.docs.map((x) => ({ id: x.id, doc: x.data() as BoxItemDoc })),
+			boxItemsSnap.docs.map((x) => ({ id: x.id, doc: x.data() as BoxItemDoc })),
 		);
 		const user = userSnap.data() as UserDoc | undefined;
 		return {
@@ -63,15 +63,19 @@ export const addBoxItems = onCall(
 
 		const col = boxItems(uid);
 		return await db().runTransaction(async (tx) => {
+			// Error if the box is full
 			const count = (await tx.get(col.count())).data().count;
 			if (count + items.length > MAX_BOX_ITEMS) {
 				throw new HttpsError("resource-exhausted", "box is full");
 			}
+
+			// Set boxInitialized to true if at least one item is added
 			if (count === 0) {
 				const user: UserDoc = { boxInitialized: true };
 				tx.set(userDoc(uid), user, { merge: true });
 			}
 
+			// Add each items to Firestore
 			const now = Date.now();
 			const ids: string[] = [];
 			items.forEach((data, index) => {
